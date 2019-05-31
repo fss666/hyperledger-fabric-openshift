@@ -1,5 +1,9 @@
-# Blockchain Solution with Hyperledger Fabric + Hyperledger Explorer on Kubernetes
+# Blockchain Solution with Hyperledger Fabric + Hyperledger Explorer on Openshift
 
+oc login -u system:admin
+oc new-project myproject
+oc adm policy add-scc-to-user anyuid -z default -n myproject
+oc adm policy add-scc-to-user privileged -z default -n myproject
 
 **Maintainers:** [feitnomore](https://github.com/feitnomore/)
 
@@ -9,6 +13,11 @@ This solution uses also [CouchDB](http://couchdb.apache.org/) as peer's backend,
 *Note: Kafka/Zookeeper are running outside Kubernetes.*  
 
 *WARNING:* Use it at your own risk.
+
+## PRE-REQ
+
+* OC client
+* Ansible
 
 ## BACKGROUND
 
@@ -27,39 +36,47 @@ We're going to build a complete Hyperledger Fabric v1.3 environment with CA, Ord
 
 For this environment we're going to be using a 3-node Kubernetes cluster, a 3-node Apache Zookeeper cluster (for Kafka), a 4-node Apache Kafka cluster and a NFS server. All the machines are going to be in the same network.
 For Kubernetes cluster we'll have the following machines:
+
 ```sh
 kubenode01.local.parisi.biz
 kubenode02.local.parisi.biz
 kubenode03.local.parisi.biz
 ```
+
 *Note: This is a home Kubernetes environment however most of what is covered here should apply to any cloud provider that provides Kubernetes compatible services.*  
 
 For Apache Zookeeper we'll have the following machines:
+
 ```sh
 zookeeper1.local.parisi.biz
 zookeeper2.local.parisi.biz
 zookeeper3.local.parisi.biz
 ```
+
 *Note: Zookeeper is needed by Apache Kafka.*  
 *Note: Apache Kafka should be 1.0 for Hyperledger compatibility.*  
 *Note: Check [this link](https://dzone.com/articles/how-to-setup-kafka-cluster) for a quick guide on Kafka/Zookeeper cluster.*  
 *Note: We're using 3 Zookeeper nodes as the minimum stated in [Hyperledger Fabric Kafka Documentation](https://hyperledger-fabric.readthedocs.io/en/release-1.3/kafka.html).*  
 
 For Apache Kafka we'll have the following machines:
+
 ```sh
 kafka1.local.parisi.biz
 kafka2.local.parisi.biz
 kafka3.local.parisi.biz
 kafka4.local.parisi.biz
 ```
+
 *Note: We're using Kafka 1.0 version for Hyperledger compatibility.*  
 *Note: Check [this link](https://dzone.com/articles/how-to-setup-kafka-cluster) for a quick guide on Kafka/Zookeeper cluster.*  
 *Note: We're using 4 Kafka nodes as the minimum stated in [Hyperledger Fabric Kafka Documentation](https://hyperledger-fabric.readthedocs.io/en/release-1.3/kafka.html).*  
 
 For the NFS Server we'll have:
+
 ```sh
 storage.local.parisi.biz
 ```
+
 *Note: Check [this link](https://www.howtoforge.com/nfs-server-and-client-on-centos-7) for a quick guide on NFS Server setup*  
 *Note: Crypto materials, configuration files and some scripts will be saved on this shared filesystem.*  
 *Note: Each peer will have its own CouchDB as Ledger, meaning the data will be saved there, and not on this NFS Server.*  
@@ -68,19 +85,20 @@ The image below represents the environment infrastructure:
 
 ![slide1.jpg](https://github.com/feitnomore/hyperledger-fabric-kubernetes/raw/master/images/slide1.jpg)
 
-
 *Note: It's important to have all the environment with the time in sync as we're dealing with transactions and shared storage. Please make sure you have all the time in sync. I encourage you to use NTP on your servers. On my environment I have `ntpdate` running in a cron job.*  
 *Note: Kafka, Zookeeper and NFS Server are running outside Kubernetes.*  
 
 ### Fabric Logical view
 
 This environment will have a CA and a Orderer as Kubernetes deployments:
+
 ```sh
 blockchain-ca
 blockchain-orderer
 ```
 
 We'll also have 4 organizations, with each organization having 2 peers, organized in the following deployments:
+
 ```sh
 blockchain-org1peer1
 blockchain-org1peer2
@@ -93,11 +111,13 @@ blockchain-org4peer2
 ```
 
 The image below represents this logical view:  
- 
+
 ![slide2.jpg](https://github.com/feitnomore/hyperledger-fabric-kubernetes/raw/master/images/slide2.jpg)
 
 ### Explorer Logical view
+
 We're going to have Hyperledger Explorer as a WebUI for our environment. Hyperledger Explorer will run in 2 deployments as below:
+
 ```sh
 blockchain-explorer-db
 blockchain-explorer-app
@@ -122,14 +142,16 @@ Each Hyperledger Fabric Peer will have it's own CouchDB instance running as a si
 
 ### Step 1: Checking environment
 
-First let's make sure we have Kubernetes environment up & running:
+First let's make sure we have Minishift environment up & running:
+
 ```sh
-kubectl get nodes
+oc get nodes
 ```
 
 ### Step 2: Setting up shared storage
 
 Now, assuming the NFS server is up & running and with the correct permissions, we're going to create our `PersistentVolume`. First lets create the file `kubernetes/fabric-pv.yaml` like the example below:
+
 ```yaml
 kind: PersistentVolume
 apiVersion: v1
@@ -154,11 +176,49 @@ spec:
 *Note: NFS Server is running on `storage.local.parisi.biz` and the shared filesystem is `/nfs/fabric`. We're using `fabricfiles` as the name for this PersistentVolume.*  
 
 Now let's apply the above configuration:
-```sh 
-kubectl apply -f kubernetes/fabric-pv.yaml
+
+```bash
+oc apply -f kubernetes/fabric-pv.yaml
+```
+
+If you're running minishift, choose any PV already created and add the labels:
+
+```bash
+oc edit pv pv0100
+```
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  creationTimestamp: 2019-04-26T14:28:51Z
+  finalizers:
+  - kubernetes.io/pv-protection
+  labels:
+    volume: pv0100
+    type: local
+    name: fabricfiles
+  name: pv0100
+  resourceVersion: "2451"
+  selfLink: /api/v1/persistentvolumes/pv0100
+  uid: 9c844988-682f-11e9-a7a5-52540025ea95
+spec:
+  accessModes:
+  - ReadWriteOnce
+  - ReadWriteMany
+  - ReadOnlyMany
+  capacity:
+    storage: 100Gi
+  hostPath:
+    path: /var/lib/minishift/base/openshift.local.pv/pv0100
+    type: ""
+  persistentVolumeReclaimPolicy: Recycle
+status:
+  phase: Available
 ```
 
 After that we'll need to create a `PersistentVolumeClaim`. To do that, we'll create file `kubernetes/fabric-pvc.yaml` as below:
+
 ```yaml
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -174,16 +234,19 @@ spec:
     matchLabels:
       name: fabricfiles
 ```
+
 *Note: We're using our previously created `fabricfiles` as the selector here.*  
 
 Now let's apply the above configuration:
+
 ```sh
-kubectl apply -f kubernetes/fabric-pvc.yaml
+oc apply -f kubernetes/fabric-pvc.yaml
 ```
 
 ### Step 3: Launching a Fabric Tools helper pod
 
 In order to perform some operations on the environment like file management, peer configuration and artifact generation, we'll need a helper `Pod` running `fabric-tools`. For that we'll create file `kubernetes/fabric-tools.yaml`:
+
 ```yaml
 apiVersion: v1
 kind: Pod
@@ -213,27 +276,32 @@ spec:
         - mountPath: /host/var/run/docker.sock
           name: dockersocket
 ```
+
 *Note: It's important to have the same timezone accross all network. Check TZ environment variable.*  
 
-After creating the file, let's apply it to our kubernetes cluster: 
+After creating the file, let's apply it to our kubernetes cluster:
+
 ```sh
-kubectl apply -f kubernetes/fabric-tools.yaml
+oc apply -f kubernetes/fabric-tools.yaml
 ```
 
 Make sure the `fabric-tools` `Pod` is running before we continue:
+
 ```sh
-kubectl get pods
+oc get pods
 ```
 
 Now, assuming `fabric-tools` `Pod` is running, let's create a config directory on our shared filesystem to hold our files:
+
 ```sh
-kubectl exec -it fabric-tools -- mkdir /fabric/config
+oc exec -it fabric-tools -- mkdir /fabric/config
 ```
 
 ### Step 4: Loading the config files into the storage
 
 1 - Configtx  
 Now we're going to create the file `config/configtx.yaml` with our network configuration, like the example below:
+
 ```yaml
 ---
 Organizations:
@@ -302,10 +370,10 @@ Orderer: &OrdererDefaults
 
     Kafka:
         Brokers:
-            - kafka1.local.parisi.biz:9092
-            - kafka2.local.parisi.biz:9092
-            - kafka3.local.parisi.biz:9092
-            - kafka4.local.parisi.biz:9092
+            - my-cluster-kafka-0:9094
+            - my-cluster-kafka-1:9094
+            - my-cluster-kafka-2:9094
+            - my-cluster-kafka-3:9094
 
     Organizations:
 
@@ -337,18 +405,21 @@ Profiles:
                 - *Org3
                 - *Org4
 ```
+
 *Note: The file reflects the topology discussed on the architecture presented before.*  
 *Note: Pay attention to the Kafka brokers URLs.*  
 *Note: Its important to have Anchor Peers configuration here as it impacts Hyperledger Fabric Service Discovery.*  
 *Note: BatchTimeout and BatchSize impacts directly in the performance of your environment in terms of quantity of transactions that are processed.*  
 
 Now let's copy the file we just created to our shared filesystem:
-```sh 
-kubectl cp config/configtx.yaml fabric-tools:/fabric/config/
+
+```sh
+oc cp config/configtx.yaml fabric-tools:/fabric/config/
 ```
 
 2 - Crypto-config  
 Now lets create the file `config/crypto-config.yaml` like below:  
+
 ```yaml
 OrdererOrgs:
   - Name: Orderer
@@ -382,71 +453,75 @@ PeerOrgs:
       Count: 1
 ```
 
-Let's copy the file to our shared filesystem: 
+Let's copy the file to our shared filesystem:
+
 ```sh
-kubectl cp config/crypto-config.yaml fabric-tools:/fabric/config/
+oc cp config/crypto-config.yaml fabric-tools:/fabric/config/
 ```
 
 3 - Chaincode  
 It's time to copy our example chaincode to the shared filesystem. In this case we'll be using balance-transfer example:
+
 ```sh
-kubectl cp config/chaincode/ fabric-tools:/fabric/config/
+oc cp config/chaincode/ fabric-tools:/fabric/config/
 ```
 
 ### Step 5: Creating the necessary artifacts
 
+For the next steps, let's ssh into our fabric-tools container:
+
+```bash
+oc rsh fabric-tools /bin/bash
+```
+
 1 - cryptogen  
 Time to generate our crypto material:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
 cryptogen generate --config /fabric/config/crypto-config.yaml
-exit
 ```
 
 Now we're going to copy our files to the correct path and rename the key files:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
 cp -r crypto-config /fabric/
 for file in $(find /fabric/ -iname *_sk); do echo $file; dir=$(dirname $file); mv ${dir}/*_sk ${dir}/key.pem; done
-exit
 ```
-
 
 2 - configtxgen  
 Now we're going to copy the artifacts to the correct path and generate the genesis block:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
 cp /fabric/config/configtx.yaml /fabric/
 cd /fabric
 configtxgen -profile FourOrgsOrdererGenesis -outputBlock genesis.block
-exit
-``` 
+```
 
 3 - Anchor Peers  
-Lets create the Anchor Peers configuration files using configtxgen: 
+Lets create the Anchor Peers configuration files using configtxgen:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
 cd /fabric
 configtxgen -profile FourOrgsChannel -outputAnchorPeersUpdate ./Org1MSPanchors.tx -channelID channel1 -asOrg Org1MSP
 configtxgen -profile FourOrgsChannel -outputAnchorPeersUpdate ./Org2MSPanchors.tx -channelID channel1 -asOrg Org2MSP
 configtxgen -profile FourOrgsChannel -outputAnchorPeersUpdate ./Org3MSPanchors.tx -channelID channel1 -asOrg Org3MSP
 configtxgen -profile FourOrgsChannel -outputAnchorPeersUpdate ./Org4MSPanchors.tx -channelID channel1 -asOrg Org4MSP
-exit
 ```
-*Note: The generated files will be used later to update channel configuration with the respective Anchor Peers. This step is important for Hyperledger Fabric Service Discovery to work properly.*   
+
+*Note: The generated files will be used later to update channel configuration with the respective Anchor Peers. This step is important for Hyperledger Fabric Service Discovery to work properly.*
 
 4 - Fix Permissions  
 We need to fix the files permissions on our shared filesystem now:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
 chmod a+rx /fabric/* -R
 exit
 ```
 
-
 ### Step 6: Setting up Fabric CA
 
 Create the `kubernetes/blockchain-ca_deploy.yaml` file with the following `Deployment` description:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -491,15 +566,18 @@ spec:
         - mountPath: /fabric
           name: fabricfiles
 ```
+
 *Note: The CA uses our shared filesystem.*  
 *Note: The timezone configuration is important for certificate validation and expiration.*  
 
 Now let's apply the configuration:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-ca_deploy.yaml
+oc apply -f kubernetes/blockchain-ca_deploy.yaml
 ```
 
 Create the file `kubernetes/blockchain-ca_svc.yaml` with the following `Service` description:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -522,14 +600,60 @@ spec:
 ```
 
 Now, apply the configuration:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-ca_svc.yaml
+oc apply -f kubernetes/blockchain-ca_svc.yaml
 ```
 
+### Step 7: Installing Strimzi Cluster
 
-### Step 7: Setting up Fabric Orderer
+First, we need to install the Kafka Operator:
+
+```bash
+oc apply -f strimzi/install/
+```
+
+Now, let's create our Kafka CR:
+
+```yaml
+apiVersion: kafka.strimzi.io/v1alpha1
+kind: Kafka
+metadata:
+ name: my-cluster
+spec:
+ kafka:
+   replicas: 4
+   listeners:
+     external:
+       type: route
+   config:
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+   storage:
+      type: persistent-claim
+      size: 5Gi
+      deleteClaim: false
+ zookeeper:
+   replicas: 3
+   storage:
+      type: persistent-claim
+      size: 5Gi
+      deleteClaim: false
+ entityOperator:
+   topicOperator: {}
+```
+
+```bash
+oc apply -f strimzi/example/kafka-cluster.yaml
+```
+
+Now wait for zookeeper and kafka containers be ready and running.
+
+### Step 8: Setting up Fabric Orderer
 
 Create the file `kubernetes/blockchain-orderer_deploy.yaml` with the following `Deployment` description:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -569,7 +693,7 @@ spec:
         - name: CONFIGTX_GENERAL_ORDERERTYPE
           value: kafka
         - name: CONFIGTX_ORDERER_KAFKA_BROKERS
-          value: "kafka1.local.parisi.biz:9092,kafka2.local.parisi.biz:9092,kafka3.local.parisi.biz:9092,kafka4.local.parisi.biz:9092"
+          value: "my-cluster-kafka-0:9094,my-cluster-kafka-1:9094,my-cluster-kafka-2:9094,my-cluster-kafka-3:9094"
         - name: ORDERER_KAFKA_RETRY_SHORTINTERVAL
           value: 1s
         - name: ORDERER_KAFKA_RETRY_SHORTTOTAL
@@ -604,6 +728,7 @@ spec:
         - mountPath: /fabric
           name: fabricfiles
 ```
+
 *Note: Because we're dealing with transactions, timezones needs to be in sync everywhere.*  
 *Note: The Orderer also uses our shared filesystem.*  
 *Note: Orderer is using Kafka.*  
@@ -611,11 +736,13 @@ spec:
 *Note: We're using a deployment with 3 Orderers.*  
 
 Let's apply the configuration:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-orderer_deploy.yaml
+oc apply -f kubernetes/blockchain-orderer_deploy.yaml
 ```
 
 Create the file `kubernetes/blockchain-orderer_svc.yaml` with the following `Service` description:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -632,18 +759,21 @@ spec:
     port: 31010
     name: grpc
 ```
+
 *Note: This service will Load Balance between the 3 Orderer Pods created in the previous Deployment.*  
 
-
 Now, apply the configuration:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-orderer_svc.yaml
+oc apply -f kubernetes/blockchain-orderer_svc.yaml
 ```
 
 ### Step 8: Org1MSP
 
-- Create Org1MSP Peer1 Deployment  
+- Create Org1MSP Peer1 Deployment 
+
 Create the file `kubernetes/blockchain-org1peer1_deploy.yaml` with the following `Deployment`:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -760,14 +890,17 @@ spec:
         - name: COUCHDB_PASSWORD
           value: "hyperledgerpass"
 ```
+
 *Note: Because we're dealing with transactions, its important that every pod is running in the same timezone. Pay attention to the TZ environment variable.*  
 *Note: CORE_PEER_GOSSIP_BOOTSTRAP, CORE_PEER_GOSSIP_ENDPOINT and CORE_PEER_GOSSIP_EXTERNALENDPOINT are critical for the Hyperledger Fabric Service Discovery to work.*  
 *Note: Volume dockersocket is used in order for the peer to have access to the docker daemon running on the host the peer is running, to be able to launch the chaincode container*  
 *Note: The chaincode container will be launched directly into Docker Daemon, and will not show up in Kubernetes.*  
 *Note: There is a sidecar container running CouchDB. There are environment variables setting the peer to use this CouchDB instance.*  
 
-- Create Org1MSP Peer2 Deployment  
+- Create Org1MSP Peer2 Deployment
+
 Create the file `kubernetes/blockchain-org1peer2_deploy.yaml` with the following `Deployment`:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -884,6 +1017,7 @@ spec:
         - name: COUCHDB_PASSWORD
           value: "hyperledgerpass"
 ```
+
 *Note: The peer uses our shared filesystem.*  
 *Note: Because we're dealing with transactions, its important that every pod is running in the same timezone. Pay attention to the TZ environment variable.*  
 *Note: CORE_PEER_GOSSIP_BOOTSTRAP, CORE_PEER_GOSSIP_ENDPOINT and CORE_PEER_GOSSIP_EXTERNALENDPOINT are critical for the Hyperledger Fabric Service Discovery to work.*  
@@ -891,8 +1025,10 @@ spec:
 *Note: The chaincode container will be launched directly into Docker Daemon, and will not show up in Kubernetes.*  
 *Note: There is a sidecar container running CouchDB. There are environment variables setting the peer to use this CouchDB instance.*  
 
-- Create Org1MSP Peer1 Service  
+- Create Org1MSP Peer1 Service
+
 Create the file `kubernetes/blockchain-org1peer1_svc.yaml` with the `Service` below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -915,8 +1051,11 @@ spec:
     port: 5984
     name: couchdb
 ```
-- Create Org1MSP Peer2 Service  
+
+- Create Org1MSP Peer2 Service
+
 Create the file `kubernetes/blockchain-org1peer2_svc.yaml` with the `Service` below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -939,19 +1078,24 @@ spec:
     port: 5984
     name: couchdb
 ```
+
 - Apply Configuration  
+
 Now we're going to apply the previously created files:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-org1peer1_deploy.yaml
-kubectl apply -f kubernetes/blockchain-org1peer2_deploy.yaml
-kubectl apply -f kubernetes/blockchain-org1peer1_svc.yaml
-kubectl apply -f kubernetes/blockchain-org1peer2_svc.yaml
+oc apply -f kubernetes/blockchain-org1peer1_deploy.yaml
+oc apply -f kubernetes/blockchain-org1peer2_deploy.yaml
+oc apply -f kubernetes/blockchain-org1peer1_svc.yaml
+oc apply -f kubernetes/blockchain-org1peer2_svc.yaml
 ```
 
 ### Step 9: Org2MSP
 
-- Create Org2MSP Peer1 Deployment  
+- Create Org2MSP Peer1 Deployment
+
 Create the file `kubernetes/blockchain-org2peer1_deploy.yaml` with the following `Deployment`:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -1068,6 +1212,7 @@ spec:
         - name: COUCHDB_PASSWORD
           value: "hyperledgerpass"
 ```
+
 *Note: The peer uses our shared filesystem.*  
 *Note: Because we're dealing with transactions, its important that every pod is running in the same timezone. Pay attention to the TZ environment variable.*  
 *Note: CORE_PEER_GOSSIP_BOOTSTRAP, CORE_PEER_GOSSIP_ENDPOINT and CORE_PEER_GOSSIP_EXTERNALENDPOINT are critical for the Hyperledger Fabric Service Discovery to work.*  
@@ -1075,8 +1220,10 @@ spec:
 *Note: The chaincode container will be launched directly into Docker Daemon, and will not show up in Kubernetes.*  
 *Note: There is a sidecar container running CouchDB. There are environment variables setting the peer to use this CouchDB instance.*  
 
-- Create Org2MSP Peer2 Deployment  
+- Create Org2MSP Peer2 Deployment
+
 Create the file `kubernetes/blockchain-org2peer2_deploy.yaml` the following `Deployment`:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -1193,6 +1340,7 @@ spec:
         - name: COUCHDB_PASSWORD
           value: "hyperledgerpass"
 ```
+
 *Note: The peer uses our shared filesystem.*  
 *Note: Because we're dealing with transactions, its important that every pod is running in the same timezone. Pay attention to the TZ environment variable.*  
 *Note: CORE_PEER_GOSSIP_BOOTSTRAP, CORE_PEER_GOSSIP_ENDPOINT and CORE_PEER_GOSSIP_EXTERNALENDPOINT are critical for the Hyperledger Fabric Service Discovery to work.*  
@@ -1200,8 +1348,10 @@ spec:
 *Note: The chaincode container will be launched directly into Docker Daemon, and will not show up in Kubernetes.*  
 *Note: There is a sidecar container running CouchDB. There are environment variables setting the peer to use this CouchDB instance.*  
 
-- Create Org2MSP Peer1 Service  
+- Create Org2MSP Peer1 Service
+
 Create the file `kubernetes/blockchain-org2peer1_svc.yaml` with the `Service` below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -1224,8 +1374,11 @@ spec:
     port: 5984
     name: couchdb
 ```
-- Create Org2MSP Peer2 Service  
+
+- Create Org2MSP Peer2 Service
+
 Create the file `kubernetes/blockchain-org2peer2_svc.yaml` with the `Service` below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -1249,19 +1402,23 @@ spec:
     name: couchdb
 ```
 
-- Apply Configuration  
+- Apply Configuration
+
 Now we're going to apply the previously created files:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-org2peer1_deploy.yaml
-kubectl apply -f kubernetes/blockchain-org2peer2_deploy.yaml
-kubectl apply -f kubernetes/blockchain-org2peer1_svc.yaml
-kubectl apply -f kubernetes/blockchain-org2peer2_svc.yaml
+oc apply -f kubernetes/blockchain-org2peer1_deploy.yaml
+oc apply -f kubernetes/blockchain-org2peer2_deploy.yaml
+oc apply -f kubernetes/blockchain-org2peer1_svc.yaml
+oc apply -f kubernetes/blockchain-org2peer2_svc.yaml
 ```
 
 ### Step 10: Org3MSP
 
-- Create Org3MSP Peer1 Deployment  
+- Create Org3MSP Peer1 Deployment
+
 Create the file `kubernetes/blockchain-org3peer1_deploy.yaml` with the following `Deployment`:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -1378,6 +1535,7 @@ spec:
         - name: COUCHDB_PASSWORD
           value: "hyperledgerpass"
 ```
+
 *Note: The peer uses our shared filesystem.*  
 *Note: Because we're dealing with transactions, its important that every pod is running in the same timezone. Pay attention to the TZ environment variable.*  
 *Note: CORE_PEER_GOSSIP_BOOTSTRAP, CORE_PEER_GOSSIP_ENDPOINT and CORE_PEER_GOSSIP_EXTERNALENDPOINT are critical for the Hyperledger Fabric Service Discovery to work.*  
@@ -1385,8 +1543,10 @@ spec:
 *Note: The chaincode container will be launched directly into Docker Daemon, and will not show up in Kubernetes.*  
 *Note: There is a sidecar container running CouchDB. There are environment variables setting the peer to use this CouchDB instance.*  
 
-- Create Org3MSP Peer2 Deployment  
+- Create Org3MSP Peer2 Deployment
+
 Create the file `kubernetes/blockchain-org3peer2_deploy.yaml` with the following `Deployment`:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -1503,6 +1663,7 @@ spec:
         - name: COUCHDB_PASSWORD
           value: "hyperledgerpass"
 ```
+
 *Note: The peer uses our shared filesystem.*  
 *Note: Because we're dealing with transactions, its important that every pod is running in the same timezone. Pay attention to the TZ environment variable.*  
 *Note: CORE_PEER_GOSSIP_BOOTSTRAP, CORE_PEER_GOSSIP_ENDPOINT and CORE_PEER_GOSSIP_EXTERNALENDPOINT are critical for the Hyperledger Fabric Service Discovery to work.*  
@@ -1510,8 +1671,10 @@ spec:
 *Note: The chaincode container will be launched directly into Docker Daemon, and will not show up in Kubernetes.*  
 *Note: There is a sidecar container running CouchDB. There are environment variables setting the peer to use this CouchDB instance.*  
 
-- Create Org3MSP Peer1 Service  
+- Create Org3MSP Peer1 Service
+
 Create the file `kubernetes/blockchain-org3peer1_svc.yaml` with the `Service` below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -1534,8 +1697,11 @@ spec:
     port: 5984
     name: couchdb
 ```
-- Create Org3MSP Peer2 Service  
+
+- Create Org3MSP Peer2 Service
+
 Create the file `kubernetes/blockchain-org3peer2_svc.yaml` with `Service` below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -1558,13 +1724,16 @@ spec:
     port: 5984
     name: couchdb
 ```
-- Apply Configuration  
+
+- Apply Configuration
+
 Now we're going to apply the previously created files:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-org3peer1_deploy.yaml
-kubectl apply -f kubernetes/blockchain-org3peer2_deploy.yaml
-kubectl apply -f kubernetes/blockchain-org3peer1_svc.yaml
-kubectl apply -f kubernetes/blockchain-org3peer2_svc.yaml
+oc apply -f kubernetes/blockchain-org3peer1_deploy.yaml
+oc apply -f kubernetes/blockchain-org3peer2_deploy.yaml
+oc apply -f kubernetes/blockchain-org3peer1_svc.yaml
+oc apply -f kubernetes/blockchain-org3peer2_svc.yaml
 ```
 
 ### Step 11: Org4MSP
@@ -1687,6 +1856,7 @@ spec:
         - name: COUCHDB_PASSWORD
           value: "hyperledgerpass"
 ```
+
 *Note: The peer uses our shared filesystem.*  
 *Note: Because we're dealing with transactions, its important that every pod is running in the same timezone. Pay attention to the TZ environment variable.*  
 *Note: CORE_PEER_GOSSIP_BOOTSTRAP, CORE_PEER_GOSSIP_ENDPOINT and CORE_PEER_GOSSIP_EXTERNALENDPOINT are critical for the Hyperledger Fabric Service Discovery to work.*  
@@ -1694,8 +1864,10 @@ spec:
 *Note: The chaincode container will be launched directly into Docker Daemon, and will not show up in Kubernetes.*  
 *Note: There is a sidecar container running CouchDB. There are environment variables setting the peer to use this CouchDB instance.*  
 
-- Create Org4MSP Peer2 Deployment  
+- Create Org4MSP Peer2 Deployment
+
 Create the file `kubernetes/blockchain-org4peer2_deploy.yaml` with the following `Deployment`:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -1812,6 +1984,7 @@ spec:
         - name: COUCHDB_PASSWORD
           value: "hyperledgerpass"
 ```
+
 *Note: The peer uses our shared filesystem.*  
 *Note: Because we're dealing with transactions, its important that every pod is running in the same timezone. Pay attention to the TZ environment variable.*  
 *Note: CORE_PEER_GOSSIP_BOOTSTRAP, CORE_PEER_GOSSIP_ENDPOINT and CORE_PEER_GOSSIP_EXTERNALENDPOINT are critical for the Hyperledger Fabric Service Discovery to work.*  
@@ -1819,8 +1992,10 @@ spec:
 *Note: The chaincode container will be launched directly into Docker Daemon, and will not show up in Kubernetes.*  
 *Note: There is a sidecar container running CouchDB. There are environment variables setting the peer to use this CouchDB instance.*  
 
-- Create Org4MSP Peer1 Service  
+- Create Org4MSP Peer1 Service
+
 Create the file `kubernetes/blockchain-org4peer1_svc.yaml` with the `Service` below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -1843,8 +2018,11 @@ spec:
     port: 5984
     name: couchdb
 ```
-- Create Org4MSP Peer2 Service  
+
+- Create Org4MSP Peer2 Service
+
 Create the file `kubernetes/blockchain-org4peer2_svc.yaml` with the `Service` below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -1867,19 +2045,23 @@ spec:
     port: 5984
     name: couchdb
 ```
+
 - Apply Configuration  
 Now we're going to apply the previously created files:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-org4peer1_deploy.yaml
-kubectl apply -f kubernetes/blockchain-org4peer2_deploy.yaml
-kubectl apply -f kubernetes/blockchain-org4peer1_svc.yaml
-kubectl apply -f kubernetes/blockchain-org4peer2_svc.yaml
+oc apply -f kubernetes/blockchain-org4peer1_deploy.yaml
+oc apply -f kubernetes/blockchain-org4peer2_deploy.yaml
+oc apply -f kubernetes/blockchain-org4peer1_svc.yaml
+oc apply -f kubernetes/blockchain-org4peer2_svc.yaml
 ```
 
 ### Step 12: Create Channel
+
 Now its time to create our channel:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 export CHANNEL_NAME="channel1"
 cd /fabric
 configtxgen -profile FourOrgsChannel -outputCreateChannelTx ${CHANNEL_NAME}.tx -channelID ${CHANNEL_NAME}
@@ -1890,16 +2072,18 @@ export CORE_PEER_NETWORKID="nid1"
 export CORE_PEER_LOCALMSPID="Org1MSP"
 export CORE_PEER_MSPCONFIGPATH="/fabric/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/"
 export FABRIC_CFG_PATH="/etc/hyperledger/fabric"
-peer channel create -o ${ORDERER_URL} -c ${CHANNEL_NAME} -f /fabric/${CHANNEL_NAME}.tx 
+peer channel create -o ${ORDERER_URL} -c ${CHANNEL_NAME} -f /fabric/${CHANNEL_NAME}.tx
 exit
 ```
 
 ### Step 13: Join Channel
 
-- Org1MSP  
+- Org1MSP
+
 Let's join Org1MSP to our channel:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 export CHANNEL_NAME="channel1"
 export CORE_PEER_NETWORKID="nid1"
 export ORDERER_URL="blockchain-orderer:31010"
@@ -1921,10 +2105,13 @@ peer channel join -b ${CHANNEL_NAME}_newest.block
 rm -rf /${CHANNEL_NAME}_newest.block
 exit
 ```
-- Org2MSP  
+
+- Org2MSP
+
 Let's join Org2MSP to our channel:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 export CHANNEL_NAME="channel1"
 export CORE_PEER_NETWORKID="nid1"
 export ORDERER_URL="blockchain-orderer:31010"
@@ -1946,10 +2133,13 @@ peer channel join -b ${CHANNEL_NAME}_newest.block
 rm -rf /${CHANNEL_NAME}_newest.block
 exit
 ```
-- Org3MSP  
+
+- Org3MSP
+
 Let's join Org3MSP to our channel:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 export CHANNEL_NAME="channel1"
 export CORE_PEER_NETWORKID="nid1"
 export ORDERER_URL="blockchain-orderer:31010"
@@ -1971,10 +2161,13 @@ peer channel join -b ${CHANNEL_NAME}_newest.block
 rm -rf /${CHANNEL_NAME}_newest.block
 exit
 ```
-- Org4MSP  
+
+- Org4MSP
+
 Let's join Org4MSP to our channel:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 export CHANNEL_NAME="channel1"
 export CORE_PEER_NETWORKID="nid1"
 export ORDERER_URL="blockchain-orderer:31010"
@@ -1999,10 +2192,12 @@ exit
 
 ### Step 14: Install Chaincode
 
-- Org1MSP  
+- Org1MSP 
+
 Let's install our chaincode on Org1MSP Peers:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 cp -r /fabric/config/chaincode $GOPATH/src/
 export CHAINCODE_NAME="cc"
 export CHAINCODE_VERSION="1.0"
@@ -2018,10 +2213,13 @@ peer chaincode install -n ${CHAINCODE_NAME} -v ${CHAINCODE_VERSION} -p chaincode
 
 exit
 ```
-- Org2MSP  
+
+- Org2MSP
+
 Let's install our chaincode on Org2MSP Peers:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 cp -r /fabric/config/chaincode $GOPATH/src/
 export CHAINCODE_NAME="cc"
 export CHAINCODE_VERSION="1.0"
@@ -2037,10 +2235,13 @@ peer chaincode install -n ${CHAINCODE_NAME} -v ${CHAINCODE_VERSION} -p chaincode
 
 exit
 ```
-- Org3MSP  
+
+- Org3MSP
+
 Let's install our chaincode on Org3MSP Peers:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 cp -r /fabric/config/chaincode $GOPATH/src/
 export CHAINCODE_NAME="cc"
 export CHAINCODE_VERSION="1.0"
@@ -2056,10 +2257,13 @@ peer chaincode install -n ${CHAINCODE_NAME} -v ${CHAINCODE_VERSION} -p chaincode
 
 exit
 ```
-- Org4MSP  
+
+- Org4MSP
+
 Let's install our chaincode on Org4MSP Peers:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+oc exec -it fabric-tools -- /bin/bash
 cp -r /fabric/config/chaincode $GOPATH/src/
 export CHAINCODE_NAME="cc"
 export CHAINCODE_VERSION="1.0"
@@ -2079,8 +2283,10 @@ exit
 ### Step 15: Instantiate Chaincode
 
 Now its time to instantiate our chaincode:
+
 ```sh
-kubectl exec -it fabric-tools -- /bin/bash
+
+oc exec -it fabric-tools -- /bin/bash
 export CHANNEL_NAME="channel1"
 export CHAINCODE_NAME="cc"
 export CHAINCODE_VERSION="1.0"
@@ -2093,6 +2299,7 @@ export ORDERER_URL="blockchain-orderer:31010"
 peer chaincode instantiate -o ${ORDERER_URL} -C ${CHANNEL_NAME} -n ${CHAINCODE_NAME} -v ${CHAINCODE_VERSION} -P "AND('Org1MSP.member','Org2MSP.member','Org3MSP.member','Org4MSP.member')" -c '{"Args":["init","a","300","b","600"]}'
 exit
 ```
+
 *Note: The policy -P is set using AND. This will set the policy in a way that at least 1 peer from each Org will need to endorse the transaction.*  
 *Note: Because of this policy, every transaction sent to the network will have to be sent to at least 1 peer from each organization.*  
 *Note: As we're using Balance Transfer example, we're starting A with 300 and B with 600.*  
@@ -2100,19 +2307,21 @@ exit
 ### Step 16: AnchorPeers
 
 Now we need to update our channel configuration to reflect our Anchor Peers:
+
 ```sh
-pod=$(kubectl get pods | grep blockchain-org1peer1 | awk '{print $1}')
-kubectl exec -it $pod -- peer channel update -f /fabric/Org1MSPanchors.tx -c channel1 -o blockchain-orderer:31010 
+pod=$(oc get pods | grep blockchain-org1peer1 | awk '{print $1}')
+oc exec -it $pod -- peer channel update -f /fabric/Org1MSPanchors.tx -c channel1 -o blockchain-orderer:31010 
 
-pod=$(kubectl get pods | grep blockchain-org2peer1 | awk '{print $1}')
-kubectl exec -it $pod -- peer channel update -f /fabric/Org2MSPanchors.tx -c channel1 -o blockchain-orderer:31010
+pod=$(oc get pods | grep blockchain-org2peer1 | awk '{print $1}')
+oc exec -it $pod -- peer channel update -f /fabric/Org2MSPanchors.tx -c channel1 -o blockchain-orderer:31010
 
-pod=$(kubectl get pods | grep blockchain-org3peer1 | awk '{print $1}')
-kubectl exec -it $pod -- peer channel update -f /fabric/Org3MSPanchors.tx -c channel1 -o blockchain-orderer:31010
+pod=$(oc get pods | grep blockchain-org3peer1 | awk '{print $1}')
+oc exec -it $pod -- peer channel update -f /fabric/Org3MSPanchors.tx -c channel1 -o blockchain-orderer:31010
 
-pod=$(kubectl get pods | grep blockchain-org4peer1 | awk '{print $1}')
-kubectl exec -it $pod -- peer channel update -f /fabric/Org4MSPanchors.tx -c channel1 -o blockchain-orderer:31010 
+pod=$(oc get pods | grep blockchain-org4peer1 | awk '{print $1}')
+oc exec -it $pod -- peer channel update -f /fabric/Org4MSPanchors.tx -c channel1 -o blockchain-orderer:31010 
 ```
+
 *Note: This step is very important for the Hyperledger Fabric Service Discovery to work properly.*  
 *Note: For each organization we only need to execute the peer channel update once.*  
 *Note: The command is executed on a peer that is on the same Organization as the Anchor file.*  
@@ -2120,6 +2329,7 @@ kubectl exec -it $pod -- peer channel update -f /fabric/Org4MSPanchors.tx -c cha
 ### Step 17: Deploy Hyperledger Explorer
 
 Fabric Explorer needs a PostgreSQL Database as its backend. In order to deploy, we'll create the file `kubernetes/blockchain-explorer-db_deploy.yaml` with the following `Deployment`:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -2153,15 +2363,18 @@ spec:
         - mountPath: /fabric
           name: fabricfiles
 ```
+
 *Note: The timezone is also important here.*  
 *Note: This pod will need Internet access.*  
 
 Now we're going to apply the configuration:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-explorer-db_deploy.yaml
+oc apply -f kubernetes/blockchain-explorer-db_deploy.yaml
 ```
 
 After that, we need to create the `Service` entry for our database. To do that let's create the file `kubernetes/blockchain-explorer-db_svc.yaml` as below:
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -2181,14 +2394,16 @@ spec:
 ```
 
 Now we're going to apply the configuration:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-explorer-db_svc.yaml
+oc apply -f kubernetes/blockchain-explorer-db_svc.yaml
 ```
 
 Now, before proceeding, make sure the PostgreSQL Pod is running. We need to create the tables and artifacts for Hyperledger Explorer in our database:
+
 ```sh
-pod=$(kubectl get pods | grep blockchain-explorer-db | awk '{print $1}')
-kubectl exec -it $pod -- /bin/bash
+pod=$(oc get pods | grep blockchain-explorer-db | awk '{print $1}')
+oc exec -it $pod -- /bin/bash
 mkdir -p /fabric/config/explorer/db/
 mkdir -p /fabric/config/explorer/app/
 cd /fabric/config/explorer/db/
@@ -2205,7 +2420,9 @@ chmod +x ./createdb.sh
 ./createdb.sh
 exit
 ```
+
 Now, we're going to create the config file with our Hyperledger Network description to use on Hyperledger Explorer. In order to do that, we'll create the file `config/explorer/app/config.json` with the following configuration:
+
 ```json
 {
   "network-configs": {
@@ -2410,11 +2627,13 @@ Now, we're going to create the config file with our Hyperledger Network descript
 ```
 
 After creating the file, its time to copy it to our shared filesystem:
+
 ```sh
-kubectl cp config/explorer/app/config.json fabric-tools:/fabric/config/explorer/app/
+oc cp config/explorer/app/config.json fabric-tools:/fabric/config/explorer/app/
 ```  
 
 Create the `config/explorer/app/run.sh` as below:
+
 ```sh
 #!/bin/sh
 mkdir -p /opt/explorer/app/platform/fabric/
@@ -2428,12 +2647,14 @@ node $EXPLORER_APP_PATH/main.js && tail -f /dev/null
 ```
 
 After creating the file, its time to copy it to our shared filesystem:
+
 ```sh
 chmod +x config/explorer/app/run.sh
-kubectl cp config/explorer/app/run.sh fabric-tools:/fabric/config/explorer/app/
+oc cp config/explorer/app/run.sh fabric-tools:/fabric/config/explorer/app/
 ```
 
 Now its time to create our Hyperledger Explorer application `Deployment` by creating the file `kubernetes/blockchain-explorer-app_deploy.yaml` as below:
+
 ```yaml
 apiVersion: extensions/v1beta1
 kind: Deployment
@@ -2468,28 +2689,32 @@ spec:
         - mountPath: /fabric
           name: fabricfiles
 ```
+
 *Note: Again setting up the timezone as the reports might get impacted.*  
 *Note: This deployment will have access to the shared filesystem as the startup script and config files are store there.*  
 *Note: There are 3 environment variables here pointing our application to the previously created PostgreSQL service.*  
 
 Now its time to apply our `Deployment`:
+
 ```sh
-kubectl apply -f kubernetes/blockchain-explorer-app_deploy.yaml
+oc apply -f kubernetes/blockchain-explorer-app_deploy.yaml
 ```
 
 ## CLEANUP
 
 Now, to leave our environment clean, we're going to remove our helper `Pod`:
+
 ```sh
-kubectl delete -f kubernetes/fabric-tools.yaml
+oc delete -f kubernetes/fabric-tools.yaml
 ```
 
 ## VALIDATING
 
-Now, we're going to run 2 transactions. The first one we'll move 50 from `A` to `B`. The second one we'll move 33 from `B` to `A`: 
+Now, we're going to run 2 transactions. The first one we'll move 50 from `A` to `B`. The second one we'll move 33 from `B` to `A`:
+
 ```sh
-pod=$(kubectl get pods | grep blockchain-org1peer1 | awk '{print $1}')
-kubectl exec -it $pod -- /bin/bash
+pod=$(oc get pods | grep blockchain-org1peer1 | awk '{print $1}')
+oc exec -it $pod -- /bin/bash
 
 peer chaincode invoke --peerAddresses blockchain-org1peer1:30110 --peerAddresses blockchain-org2peer1:30110 --peerAddresses blockchain-org3peer1:30110 --peerAddresses blockchain-org4peer1:30110 -o blockchain-orderer:31010 -C channel1 -n cc -c '{"Args":["invoke","a","b","50"]}'
 
@@ -2497,14 +2722,16 @@ peer chaincode invoke --peerAddresses blockchain-org1peer1:30110 --peerAddresses
 
 exit
 ```
+
 *Note: The invoke command is using --peerAddresses parameter four times, in order to send the transaction to at least one peer from each organization.*  
 *Note: The first transaction might take a little bit to go through.*  
 *Note: We're executing transaction on Org1MSP Peer1.*  
 
-Now we're going to check our balance. As stated before, we've started `A` with 300 and `B` with 600: 
+Now we're going to check our balance. As stated before, we've started `A` with 300 and `B` with 600:
+
 ```sh
-pod=$(kubectl get pods | grep blockchain-org1peer1 | awk '{print $1}')
-kubectl exec -it $pod -- /bin/bash
+pod=$(oc get pods | grep blockchain-org1peer1 | awk '{print $1}')
+oc exec -it $pod -- /bin/bash
 
 peer chaincode query -C channel1 -n cc -c '{"Args":["query","a"]}'
 
@@ -2512,13 +2739,15 @@ peer chaincode query -C channel1 -n cc -c '{"Args":["query","b"]}'
 
 exit
 ```
+
 *Note: A should return 283 and B should return 617.*  
 *Note: We're executing transaction on Org1MSP Peer1.*  
 
 We can also check the network status as well as the transactions on Hyperledger Explorer:
+
 ```sh
-pod=$(kubectl get pods | grep blockchain-explorer-app | awk '{print $1}')
-kubectl port-forward $pod 8080:8080
+pod=$(oc get pods | grep blockchain-explorer-app | awk '{print $1}')
+oc port-forward $pod 8080:8080
 ```
 
 Now open your browser to [http://127.0.0.1:8080/](http://127.0.0.1:8080/).

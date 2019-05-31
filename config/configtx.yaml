@@ -65,10 +65,12 @@ Orderer: &OrdererDefaults
 
     Kafka:
         Brokers:
-            - kafka1.local.parisi.biz:9092
-            - kafka2.local.parisi.biz:9092
-            - kafka3.local.parisi.biz:9092
-            - kafka4.local.parisi.biz:9092
+            # - my-cluster-kafka-0:9094
+            # - my-cluster-kafka-1:9094
+            # - my-cluster-kafka-2:9094
+            #- my-cluster-kafka-bootstrap:9092
+            #- fabric-kafka:9092
+            - kafka:9092
 
     Organizations:
 

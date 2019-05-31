@@ -35,8 +35,10 @@ spec:
           value: "1000"
         - name: CONFIGTX_GENERAL_ORDERERTYPE
           value: kafka
+        #- name: CONFIGTX_ORDERER_KAFKA_BROKERS
+        #  value: "my-cluster-kafka-0:9094,my-cluster-kafka-1:9094,my-cluster-kafka-2:9094,my-cluster-kafka-3:9094"
         - name: CONFIGTX_ORDERER_KAFKA_BROKERS
-          value: "kafka1.local.parisi.biz:9092,kafka2.local.parisi.biz:9092,kafka3.local.parisi.biz:9092,kafka4.local.parisi.biz:9092"
+          value: "kafka:9092"
         - name: ORDERER_KAFKA_RETRY_SHORTINTERVAL
           value: 1s
         - name: ORDERER_KAFKA_RETRY_SHORTTOTAL
