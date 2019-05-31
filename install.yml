@@ -5,13 +5,14 @@
     project_name: "myproject"
     username: "your-user"
     password: "your-pass"
+    master_url: "https://your-ocp-cluster.com.br"
   tasks:
 
   #- name: login as system:admin
   #  shell: oc login -u system:admin
 
   - name: login as system:admin
-    shell: "oc login -u {{ username }} -p {{ password }} https://master.portoalegre-fad8.openshiftworkshop.com"
+    shell: "oc login -u {{ username }} -p {{ password }} {{ master_url }}"
 
   - name: Create myproject
     shell: "oc new-project myproject || echo 'já existe'"
